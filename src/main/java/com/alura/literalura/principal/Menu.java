@@ -11,9 +11,12 @@ import com.alura.literalura.service.LibroService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.List;
+import java.util.Optional;
+import java.util.Scanner;
 import java.util.stream.Collectors;
 
 @Component
@@ -43,7 +46,6 @@ public class Menu {
             int opcion;
             do {
                 System.out.println("""
-                    
                     --- LITERALURA ---
                     1 - Buscar libro por título
                     2 - Listar libros registrados
@@ -76,7 +78,6 @@ public class Menu {
         List<LibroDTO> librosDTO = obtenerLibrosDeAPI(titulo);
 
         if (!librosDTO.isEmpty()) {
-            System.out.println("Libros encontrados:");
             librosDTO.forEach(dto -> {
                 Optional<Libro> libroExistenteOpt = libroService.obtenerLibroPorTitulo(dto.titulo());
                 if (libroExistenteOpt.isPresent()) {
@@ -91,8 +92,7 @@ public class Menu {
                         System.out.println("Se actualizó el libro con nueva información:");
                         mostrarDetallesLibro(libroNuevo);
                     } else {
-                        System.out.println("El libro ya existe y no hay más información para actualizar:");
-                        mostrarDetallesLibro(libroExistente);
+                        System.out.println("El libro ya existe y no hay más información para actualizar.");
                     }
                 } else {
                     registrarLibro(dto);
@@ -100,7 +100,7 @@ public class Menu {
                 }
             });
         } else {
-            System.out.println("No se encontraron libros que coincidan con el título ingresado.");
+            System.out.println("No se encontraron libros que coincidan con el título: '" + titulo + "'");
         }
     }
 
@@ -110,13 +110,15 @@ public class Menu {
             String json = consumoAPI.obtenerDatos(url);
             RespuestaLibrosDTO respuesta = convierteDatos.obtenerDatos(json, RespuestaLibrosDTO.class);
 
-            List<String> palabrasTitulo = Arrays.asList(titulo.split("\\s+"));
+            // Filtrar libros que contengan al menos una palabra del título
+            List<String> palabrasClave = List.of(titulo.split(" "));
+
             return respuesta.libro().stream()
-                    .filter(l -> palabrasTitulo.stream().anyMatch(palabra -> l.titulo().toLowerCase().contains(palabra.toLowerCase())))
+                    .filter(libro -> palabrasClave.stream().anyMatch(palabra -> libro.titulo().toLowerCase().contains(palabra.toLowerCase())))
                     .collect(Collectors.toList());
         } catch (Exception e) {
             logger.error("Error al obtener datos de la API", e);
-            return Collections.emptyList();
+            return List.of();
         }
     }
 
@@ -137,13 +139,7 @@ public class Menu {
     private boolean debeActualizar(Libro existente, Libro nuevo) {
         boolean descargasMayores = nuevo.getNumeroDescargas() > existente.getNumeroDescargas();
         boolean idiomaDistinto = !nuevo.getIdiomas().equals(existente.getIdiomas());
-        boolean autorDistinto = false;
-
-        if (nuevo.getAutor() != null && existente.getAutor() != null) {
-            autorDistinto = !nuevo.getAutor().getNombre().equalsIgnoreCase(existente.getAutor().getNombre());
-        } else if (nuevo.getAutor() != null && existente.getAutor() == null) {
-            autorDistinto = true;
-        }
+        boolean autorDistinto = !nuevo.getAutor().equals(existente.getAutor());
 
         return descargasMayores || idiomaDistinto || autorDistinto;
     }
@@ -156,13 +152,11 @@ public class Menu {
 
     private void mostrarDetallesLibro(Libro libro) {
         System.out.printf("""
-                
                 ------LIBRO--------
                 Título: %s
                 Autor: %s
                 Idioma: %s
                 Número de descargas: %d
-                
                 """,
                 libro.getTitulo(),
                 libro.getAutor() == null ? "Desconocido" : libro.getAutor().getNombre(),
@@ -173,13 +167,11 @@ public class Menu {
 
     private void mostrarDetallesLibro(LibroDTO dto) {
         System.out.printf("""
-                
                 ------LIBRO--------
                 Título: %s
                 Autor: %s
                 Idioma: %s
                 Número de descargas: %d
-                
                 """,
                 dto.titulo(),
                 dto.autores().isEmpty() ? "Desconocido" : dto.autores().get(0).nombre(),
@@ -200,13 +192,11 @@ public class Menu {
                 .collect(Collectors.joining(", "));
 
         System.out.printf("""
-                
                 -------AUTOR-------
                 Autor: %s
                 Fecha de nacimiento: %d
                 Fecha de fallecimiento: %s
                 Libros: [ %s ]
-                
                 """,
                 autor.getNombre(),
                 autor.getAnoNacimiento(),

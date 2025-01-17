@@ -1,6 +1,8 @@
 package com.alura.literalura;
 
 import com.alura.literalura.principal.Menu;
+import com.alura.literalura.repository.AutorRepository;
+import com.alura.literalura.repository.LibroRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
@@ -11,6 +13,9 @@ public class LiteraluraApplication implements CommandLineRunner {
 
 	@Autowired
 	private final Menu menu;
+	private AutorRepository autorRepository;
+	private LibroRepository libroRepository;
+
 
 	// Inyección por constructor, para que el IDE no marque "never assigned"
 	public LiteraluraApplication(Menu menu) {

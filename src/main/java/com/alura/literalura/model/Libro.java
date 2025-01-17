@@ -1,6 +1,7 @@
 package com.alura.literalura.model;
 
 import jakarta.persistence.*;
+import org.hibernate.Length;
 
 import java.util.List;
 
@@ -12,8 +13,10 @@ public class Libro {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(length = 500)
     private String titulo;
 
+    @Column(length = 500)
     private String idiomas;
 
     private int numeroDescargas;
