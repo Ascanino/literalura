@@ -4,19 +4,16 @@ import com.alura.literalura.dto.LibroDTO;
 import com.alura.literalura.dto.RespuestaLibrosDTO;
 import com.alura.literalura.model.Autor;
 import com.alura.literalura.model.Libro;
-import com.alura.literalura.service.AutorService;
+import com.alura.literalura.repository.AutorRepository;
+import com.alura.literalura.repository.LibroRepository;
 import com.alura.literalura.service.ConsumoAPI;
 import com.alura.literalura.service.ConvierteDatos;
-import com.alura.literalura.service.LibroService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
-
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
-import java.util.Optional;
-import java.util.Scanner;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Component
@@ -24,21 +21,21 @@ public class Menu {
 
     private static final Logger logger = LoggerFactory.getLogger(Menu.class);
     private static final String BASE_URL = "https://gutendex.com/books/";
-    private final LibroService libroService;
-    private final AutorService autorService;
     private final ConsumoAPI consumoAPI;
     private final ConvierteDatos convierteDatos;
+    private final AutorRepository autorRepository;
+    private final LibroRepository libroRepository;
 
     public Menu(
-            LibroService libroService,
-            AutorService autorService,
             ConsumoAPI consumoAPI,
-            ConvierteDatos convierteDatos
+            ConvierteDatos convierteDatos,
+            AutorRepository autorRepository,
+            LibroRepository libroRepository
     ) {
-        this.libroService = libroService;
-        this.autorService = autorService;
         this.consumoAPI = consumoAPI;
         this.convierteDatos = convierteDatos;
+        this.autorRepository = autorRepository;
+        this.libroRepository = libroRepository;
     }
 
     public void mostrarMenu() {
@@ -46,6 +43,7 @@ public class Menu {
             int opcion;
             do {
                 System.out.println("""
+                    
                     --- LITERALURA ---
                     1 - Buscar libro por título
                     2 - Listar libros registrados
@@ -78,29 +76,18 @@ public class Menu {
         List<LibroDTO> librosDTO = obtenerLibrosDeAPI(titulo);
 
         if (!librosDTO.isEmpty()) {
+            System.out.println("Libros encontrados:");
             librosDTO.forEach(dto -> {
-                Optional<Libro> libroExistenteOpt = libroService.obtenerLibroPorTitulo(dto.titulo());
+                Optional<Libro> libroExistenteOpt = libroRepository.findByTituloIgnoreCase(dto.titulo());
                 if (libroExistenteOpt.isPresent()) {
                     Libro libroExistente = libroExistenteOpt.get();
-                    Libro libroNuevo = dto.toLibro();
-                    libroNuevo.setId(libroExistente.getId());
-                    libroNuevo.setIdiomas(libroNuevo.getIdiomas().replace("[", "").replace("]", ""));
-                    libroNuevo.setAutor(getOrCreateAutores(dto));
-
-                    if (debeActualizar(libroExistente, libroNuevo)) {
-                        libroService.actualizarLibro(libroNuevo.getId(), libroNuevo);
-                        System.out.println("Se actualizó el libro con nueva información:");
-                        mostrarDetallesLibro(libroNuevo);
-                    } else {
-                        System.out.println("El libro ya existe y no hay más información para actualizar.");
-                    }
+                    actualizarLibro(libroExistente, dto);
                 } else {
                     registrarLibro(dto);
-                    mostrarDetallesLibro(dto);
                 }
             });
         } else {
-            System.out.println("No se encontraron libros que coincidan con el título: '" + titulo + "'");
+            System.out.println("No se encontraron libros que coincidan con el título ingresado.");
         }
     }
 
@@ -110,53 +97,68 @@ public class Menu {
             String json = consumoAPI.obtenerDatos(url);
             RespuestaLibrosDTO respuesta = convierteDatos.obtenerDatos(json, RespuestaLibrosDTO.class);
 
-            // Filtrar libros que contengan al menos una palabra del título
-            List<String> palabrasClave = List.of(titulo.split(" "));
-
+            List<String> palabrasTitulo = Arrays.asList(titulo.split("\\s+"));
             return respuesta.libro().stream()
-                    .filter(libro -> palabrasClave.stream().anyMatch(palabra -> libro.titulo().toLowerCase().contains(palabra.toLowerCase())))
+                    .filter(l -> palabrasTitulo.stream().anyMatch(palabra -> l.titulo().toLowerCase().contains(palabra.toLowerCase())))
                     .collect(Collectors.toList());
         } catch (Exception e) {
             logger.error("Error al obtener datos de la API", e);
-            return List.of();
+            return Collections.emptyList();
         }
     }
 
     private void registrarLibro(LibroDTO dto) {
         Libro libro = dto.toLibro();
         libro.setIdiomas(libro.getIdiomas().replace("[", "").replace("]", ""));
-        libro.setAutor(getOrCreateAutores(dto));
-        libroService.crearLibro(libro);
-        System.out.println("Libro registrado: " + libro.getTitulo());
+        libro.setAutor(getOrCreateAutor(dto));
+        libroRepository.save(libro);
+        mostrarDetallesLibro(libro);
     }
 
-    private Autor getOrCreateAutores(LibroDTO dto) {
+    private void actualizarLibro(Libro libroExistente, LibroDTO dto) {
+        Libro libroNuevo = dto.toLibro();
+        libroNuevo.setId(libroExistente.getId());
+        libroNuevo.setIdiomas(libroNuevo.getIdiomas().replace("[", "").replace("]", ""));
+        libroNuevo.setAutor(getOrCreateAutor(dto));
+
+        if (debeActualizar(libroExistente, libroNuevo)) {
+            libroRepository.save(libroNuevo);
+            System.out.println("Se actualizó el libro con nueva información:");
+            mostrarDetallesLibro(libroNuevo);
+        } else {
+            System.out.println("El libro ya existe y no hay más información para actualizar:");
+            mostrarDetallesLibro(libroExistente);
+        }
+    }
+
+    private Autor getOrCreateAutor(LibroDTO dto) {
         String nombreAutor = dto.autores().get(0).nombre();
-        return autorService.obtenerAutorPorNombre(nombreAutor)
-                .orElseGet(() -> autorService.crearAutor(dto.autores().get(0).toAutor()));
+        return autorRepository.findByNombre(nombreAutor)
+                .orElseGet(() -> autorRepository.save(dto.autores().get(0).toAutor()));
     }
 
     private boolean debeActualizar(Libro existente, Libro nuevo) {
         boolean descargasMayores = nuevo.getNumeroDescargas() > existente.getNumeroDescargas();
         boolean idiomaDistinto = !nuevo.getIdiomas().equals(existente.getIdiomas());
-        boolean autorDistinto = !nuevo.getAutor().equals(existente.getAutor());
-
+        boolean autorDistinto = !Objects.equals(nuevo.getAutor(), existente.getAutor());
         return descargasMayores || idiomaDistinto || autorDistinto;
     }
 
     private void listarLibros() {
-        List<Libro> libros = libroService.listarLibros();
+        List<Libro> libros = libroRepository.findAll();
         System.out.println("Número de libros registrados: " + libros.size());
         libros.forEach(this::mostrarDetallesLibro);
     }
 
     private void mostrarDetallesLibro(Libro libro) {
         System.out.printf("""
+                
                 ------LIBRO--------
                 Título: %s
                 Autor: %s
                 Idioma: %s
                 Número de descargas: %d
+                
                 """,
                 libro.getTitulo(),
                 libro.getAutor() == null ? "Desconocido" : libro.getAutor().getNombre(),
@@ -165,23 +167,8 @@ public class Menu {
         );
     }
 
-    private void mostrarDetallesLibro(LibroDTO dto) {
-        System.out.printf("""
-                ------LIBRO--------
-                Título: %s
-                Autor: %s
-                Idioma: %s
-                Número de descargas: %d
-                """,
-                dto.titulo(),
-                dto.autores().isEmpty() ? "Desconocido" : dto.autores().get(0).nombre(),
-                dto.idiomas().get(0),
-                dto.numeroDescargas()
-        );
-    }
-
     private void listarAutores() {
-        List<Autor> autores = autorService.listarAutor();
+        List<Autor> autores = autorRepository.findAllConLibros();
         System.out.println("Número de autores registrados: " + autores.size());
         autores.forEach(this::mostrarDetallesAutor);
     }
@@ -192,11 +179,13 @@ public class Menu {
                 .collect(Collectors.joining(", "));
 
         System.out.printf("""
+                
                 -------AUTOR-------
                 Autor: %s
                 Fecha de nacimiento: %d
                 Fecha de fallecimiento: %s
                 Libros: [ %s ]
+                
                 """,
                 autor.getNombre(),
                 autor.getAnoNacimiento(),
@@ -210,7 +199,7 @@ public class Menu {
         int ano = sc.nextInt();
         sc.nextLine();
 
-        List<Autor> vivos = autorService.listarAutorVivosEnAno(ano);
+        List<Autor> vivos = autorRepository.findAutoresVivosEnAnoConLibros(ano);
         if (vivos.isEmpty()) {
             System.out.println("No se encontraron autores vivos en el año " + ano);
         } else {
@@ -223,7 +212,7 @@ public class Menu {
         String idioma = sc.nextLine().trim().toLowerCase();
 
         if (List.of("es", "en", "fr", "pt").contains(idioma)) {
-            libroService.listarLibrosPorIdioma(idioma).forEach(this::mostrarDetallesLibro);
+            libroRepository.findByIdiomas(idioma).forEach(this::mostrarDetallesLibro);
         } else {
             System.out.println("Idioma no válido.");
         }
