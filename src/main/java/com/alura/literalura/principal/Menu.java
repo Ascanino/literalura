@@ -11,6 +11,7 @@ import com.alura.literalura.service.ConvierteDatos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -40,30 +41,39 @@ public class Menu {
 
     public void mostrarMenu() {
         try (Scanner scanner = new Scanner(System.in)) {
-            int opcion;
+            int opcion = -1;
             do {
                 System.out.println("""
                     
                     --- LITERALURA ---
                     1 - Buscar libro por título
-                    2 - Listar libros registrados
-                    3 - Listar autores registrados
-                    4 - Listar autores vivos en un año
-                    5 - Listar libros por idioma
+                    2 - Buscar libro por autor
+                    3 - Listar libros registrados
+                    4 - Listar autores registrados
+                    5 - Listar autores registrados vivos en un año específico
+                    6 - Listar libros por idioma
                     0 - Salir
                     """);
                 System.out.print("Seleccione una opción: ");
-                opcion = scanner.nextInt();
-                scanner.nextLine();
 
-                switch (opcion) {
-                    case 1 -> buscarLibroPorTitulo(scanner);
-                    case 2 -> listarLibros();
-                    case 3 -> listarAutores();
-                    case 4 -> listarAutoresVivosEnAno(scanner);
-                    case 5 -> listarLibrosPorIdioma(scanner);
-                    case 0 -> System.out.println("Saliendo...");
-                    default -> System.out.println("Opción no válida.");
+                // Validar la entrada para asegurar que sea un número entero
+                if (scanner.hasNextInt()) {
+                    opcion = scanner.nextInt();
+                    scanner.nextLine(); // Limpia el buffer
+
+                    switch (opcion) {
+                        case 1 -> buscarLibroPorTitulo(scanner);
+                        case 2 -> buscarLibroPorAutor(scanner);
+                        case 3 -> listarLibros();
+                        case 4 -> listarAutores();
+                        case 5 -> listarAutoresVivosEnAno(scanner);
+                        case 6 -> listarLibrosPorIdioma(scanner);
+                        case 0 -> System.out.println("Saliendo...");
+                        default -> System.out.println("Opción no válida. Por favor, intente de nuevo.");
+                    }
+                } else {
+                    System.out.println("Entrada no válida. Por favor, ingrese un número.");
+                    scanner.nextLine(); // Limpia el buffer para evitar un bucle infinito
                 }
             } while (opcion != 0);
         }
@@ -91,18 +101,62 @@ public class Menu {
         }
     }
 
-    private List<LibroDTO> obtenerLibrosDeAPI(String titulo) {
+    private void buscarLibroPorAutor(Scanner sc) {
+        System.out.print("Ingrese el nombre del autor: ");
+        String autorNombre = sc.nextLine().trim();
+
+        // Llama a la API y obtiene los libros filtrados por autor
+        List<LibroDTO> librosDTO = obtenerLibrosDeAPI(autorNombre);
+
+        if (!librosDTO.isEmpty()) {
+            System.out.println("Libros encontrados para el autor:");
+            librosDTO.forEach(dto -> {
+                // Verifica si el libro ya existe en la base de datos
+                Optional<Libro> libroExistenteOpt = libroRepository.findByTituloIgnoreCase(dto.titulo());
+                if (libroExistenteOpt.isPresent()) {
+                    Libro libroExistente = libroExistenteOpt.get();
+                    actualizarLibro(libroExistente, dto);
+                } else {
+                    registrarLibro(dto);
+                }
+            });
+        } else {
+            System.out.println("No se encontraron libros para el autor ingresado.");
+        }
+    }
+
+    // Lógica ajustada para obtener libros filtrados exclusivamente por autores
+    private List<LibroDTO> obtenerLibrosDeAPI(String terminoBusqueda) {
         try {
-            String url = BASE_URL + "?search=" + URLEncoder.encode(titulo, StandardCharsets.UTF_8);
+            String url = BASE_URL + "?search=" + URLEncoder.encode(terminoBusqueda, StandardCharsets.UTF_8);
             String json = consumoAPI.obtenerDatos(url);
             RespuestaLibrosDTO respuesta = convierteDatos.obtenerDatos(json, RespuestaLibrosDTO.class);
 
-            List<String> palabrasTitulo = Arrays.asList(titulo.split("\\s+"));
+            // Filtrar libros que coincidan con el autor ingresado
             return respuesta.libro().stream()
-                    .filter(l -> palabrasTitulo.stream().anyMatch(palabra -> l.titulo().toLowerCase().contains(palabra.toLowerCase())))
+                    .filter(libro -> libro.autores().stream()
+                            .anyMatch(autor -> autor.nombre().equalsIgnoreCase(terminoBusqueda)))
                     .collect(Collectors.toList());
         } catch (Exception e) {
             logger.error("Error al obtener datos de la API", e);
+            return Collections.emptyList();
+        }
+    }
+
+    // Nueva implementación del filtro por autor
+    private List<LibroDTO> obtenerLibrosDeAPIPorAutor(String autorNombre) {
+        try {
+            String url = BASE_URL + "?search=" + URLEncoder.encode(autorNombre, StandardCharsets.UTF_8);
+            String json = consumoAPI.obtenerDatos(url);
+            RespuestaLibrosDTO respuesta = convierteDatos.obtenerDatos(json, RespuestaLibrosDTO.class);
+
+            // Filtrar libros por autor coincidente
+            return respuesta.libro().stream()
+                    .filter(libro -> libro.autores().stream()
+                            .anyMatch(autor -> autor.nombre().equalsIgnoreCase(autorNombre)))
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            logger.error("Error al obtener datos de la API para autor", e);
             return Collections.emptyList();
         }
     }
