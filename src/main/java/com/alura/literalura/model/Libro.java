@@ -6,7 +6,7 @@ import org.hibernate.Length;
 import java.util.List;
 
 @Entity
-@Table(name = "libro")
+@Table(name = "libros")
 public class Libro {
 
     @Id
